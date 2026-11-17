@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VulnSense AI — SOC Security Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-[#080C14] text-slate-100 min-h-screen font-sans antialiased">
+  <header class="border-b border-slate-800 bg-[#0B1120]">
+    <div class="max-w-6xl mx-auto px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+      <span class="text-lg font-bold tracking-tight text-cyan-400">VulnSense AI</span>
+      <div id="exportActions" class="hidden flex items-center gap-2">
+        <button id="downloadCsvBtn" class="px-3.5 py-2 text-xs font-semibold rounded-lg bg-slate-800 text-slate-100 border border-slate-700 hover:border-cyan-400">
+          Export CSV
+        </button>
+        <button id="downloadPdfBtn" class="px-3.5 py-2 text-xs font-semibold rounded-lg bg-slate-800 text-slate-100 border border-slate-700 hover:border-cyan-400">
+          Export PDF
+        </button>
+        <button id="downloadMdBtn" class="px-3.5 py-2 text-xs font-semibold rounded-lg bg-cyan-500 text-slate-950 hover:bg-cyan-400">
+          Export Markdown
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-6 py-8 space-y-8">
+    <section class="bg-[#0F172A] border border-slate-800 rounded-xl p-6">
+      <h1 class="text-2xl font-bold text-white mb-2">Passive Recon & Gemini Vulnerability Audit</h1>
+      <p class="text-sm text-slate-400 mb-4">Inspect HTTP security headers, TLS posture, cookie attributes, and server banners.</p>
+      <form id="scanForm" class="flex flex-col sm:flex-row gap-3">
+        <input id="targetUrl" type="text" placeholder="https://example.com" required
+          class="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-400" />
+        <button type="submit" id="scanBtn"
+          class="px-5 py-2.5 rounded-lg bg-cyan-500 text-slate-950 font-semibold text-sm hover:bg-cyan-400">
+          Run Passive Scan
+        </button>
+      </form>
+      <p id="errorBox" class="hidden mt-3 text-sm text-rose-400"></p>
+    </section>
+
+    <section id="resultsSection" class="hidden space-y-6">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="metricsRow"></div>
+      <div class="bg-[#0F172A] border border-slate-800 rounded-xl p-6">
+        <h2 class="text-lg font-semibold mb-2">Executive Summary</h2>
+        <p id="execSummary" class="text-sm text-slate-300 leading-relaxed"></p>
+      </div>
+      <div id="findingsList" class="space-y-3"></div>
+    </section>
+  </main>
+
+  <script>
+    let currentReport = null;
+    const form = document.getElementById('scanForm');
+    const errorBox = document.getElementById('errorBox');
+    const resultsSection = document.getElementById('resultsSection');
+    const exportActions = document.getElementById('exportActions');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorBox.classList.add('hidden');
+      const url = document.getElementById('targetUrl').value.trim();
+      const btn = document.getElementById('scanBtn');
+      btn.disabled = true;
+      btn.textContent = 'Scanning...';
+
+      try {
+        const res = await fetch('/api/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Scan failed');
+        currentReport = data;
+        renderReport(data);
+      } catch (err) {
+        errorBox.textContent = err.message;
+        errorBox.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Run Passive Scan';
+      }
+    });
+
+    function renderReport(data) {
+      resultsSection.classList.remove('hidden');
+      exportActions.classList.remove('hidden');
+      document.getElementById('execSummary').textContent = data.analysis.executive_summary;
+
+      const metricsRow = document.getElementById('metricsRow');
+      metricsRow.innerHTML = [
+        { label: 'Security Score', val: `${data.analysis.security_score.toFixed(1)} / 10` },
+        { label: 'Security Grade', val: data.analysis.grade },
+        { label: 'Findings', val: data.analysis.findings.length },
+        { label: 'TLS Protocol', val: data.recon.tls.protocol || 'No TLS' }
+      ].map(m => `
+        <div class="bg-[#0F172A] border border-slate-800 rounded-xl p-4">
+          <div class="text-xs text-slate-400">${m.label}</div>
+          <div class="text-2xl font-bold font-mono text-white mt-1">${m.val}</div>
+        </div>
+      `).join('');
+
+      const findingsList = document.getElementById('findingsList');
+      findingsList.innerHTML = data.analysis.findings.map((f) => `
+        <details class="bg-[#0F172A] border border-slate-800 rounded-xl p-4">
+          <summary class="cursor-pointer font-semibold text-sm text-white flex items-center justify-between gap-4">
+            <span>[${f.severity}] ${f.title}</span>
+            <span class="text-xs text-slate-400">${f.category}</span>
+          </summary>
+          <div class="mt-4 pt-4 border-t border-slate-800 space-y-3 text-sm text-slate-300">
+            <p>${f.risk_explanation}</p>
+            <div>
+              <div class="text-xs font-semibold text-slate-400 mb-1">Nginx Configuration Fix</div>
+              <pre class="bg-slate-950 p-3 rounded-lg text-xs overflow-x-auto text-cyan-300">${f.nginx_snippet}</pre>
+            </div>
+          </div>
+        </details>
+      `).join('');
+    }
+
+    async function downloadReport(endpoint, ext) {
+      if (!currentReport) return;
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(currentReport)
+      });
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `report_${currentReport.recon.domain}.${ext}`;
+      a.click();
+    }
+
+    document.getElementById('downloadCsvBtn').addEventListener('click', () => downloadReport('/api/report/csv', 'csv'));
+    document.getElementById('downloadPdfBtn').addEventListener('click', () => downloadReport('/api/report/pdf', 'pdf'));
+    document.getElementById('downloadMdBtn').addEventListener('click', () => downloadReport('/api/report/markdown', 'md'));
+  </script>
+</body>
+</html>

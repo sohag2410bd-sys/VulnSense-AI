@@ -1,0 +1,8 @@
+{
+  "name": "VulnSense AI",
+  "description": "Hybrid passive cybersecurity reconnaissance and Gemini AI vulnerability analysis dashboard with Termux/Linux Python CLI and Flask deliverables.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
